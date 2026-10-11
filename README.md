@@ -1,8 +1,14 @@
 <img width="990" height="150" alt="Microsoft Agent-a-thon_banner_WEB_990x150" src="https://github.com/user-attachments/assets/5f550061-077d-421c-bba2-4a5820e72fad" />
 
+
+## Multi-Agent Customer Retention Platform
+This project is developed based on Microsoft Agent-a-thon and as The Level 3 Architect
+
+
+
 # Build and Scale AI Agents with Microsoft Foundry
 ## The Level 3: Architect learning path 
- 
+
 Welcome to the hands-on lab experience where ideas turn into real, enterprise-ready solutions. This is the most advanced of the three agent-building learning paths. Where the Explorer path builds your first no-code agent and the Maker path automates work with low-code tools, this path is for developers, engineers, and architects who want complete control over models, orchestration, and operations.
 
 In this lab, you’ll build, monitor, evaluate, and orchestrate AI agents using the Microsoft Foundry SDK. You’ll follow a guided, scenario-based experience designed to help you move from concept to a working, enterprise-ready multi-agent system.

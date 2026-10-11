@@ -1,6 +1,6 @@
 """
 Challenge 4: Production Workflow — Claims Processing
-Multi-agent orchestration workflow for ClaimSight Insurance.
+Multi-agent orchestration workflow for Vehicle company, aligning with agents_lq_v6.py version.
 """
 
 import json

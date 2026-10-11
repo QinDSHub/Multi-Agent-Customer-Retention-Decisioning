@@ -1,13 +1,9 @@
 """
-In this version, there are four agents including:
-churn-triage-agent with tool calling, 
-churn-decision-agent, 
-email-content-agent, 
-auto-send-agent with MCP function.
+Introduced a custom proxy layer to inject the required `Authorization` header, 
+resolving Resend's per-request authentication requirement.
 
-The original plan was to integrate an auto-send email MCP as the agent's tool. 
-However, due to the event's limited timeframe, the email-sending MCP was replaced with 
-the Azure REST API Specifications MCP to validate the MCP-enabled workflow and tool integration.
+The end-to-end integration was successfully validated, 
+but a new issue was identified: each email was sent three times per execution.
 
 Usage:
     python agents.py
@@ -16,6 +12,7 @@ Usage:
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -23,9 +20,7 @@ from azure.ai.projects import AIProjectClient
 from azure.ai.projects.models import FunctionTool, PromptAgentDefinition
 from azure.identity import DefaultAzureCredential
 from openai.types.responses.response_input_param import FunctionCallOutput
-from openai.types.responses.response_input_param import McpApprovalResponse, ResponseInputParam
 from azure.ai.projects.models import MCPTool
-
 
 # Resolve repo root by finding .env in parent directories.
 def _find_repo_root() -> Path:
@@ -45,6 +40,7 @@ PROJECT_CONNECTION_STRING = os.getenv("PROJECT_CONNECTION_STRING")
 MODEL_DEPLOYMENT_NAME = os.getenv("MODEL_DEPLOYMENT_NAME", "gpt-5.4")
 CLAIMS_DATA_PATH = Path(__file__).resolve().parent / "churn_data.json"
 FOUNDRY_PROJECT_ENDPOINT = os.getenv("FOUNDRY_PROJECT_ENDPOINT")
+RESEND_MCP_CONNECTION_ID = os.getenv("RESEND_MCP_CONNECTION_ID")
 
 
 def _load_claim_batch() -> list[dict]:
@@ -78,6 +74,7 @@ def assess_claim(claim_id: str) -> str:
 
     results = {
         "claim_id": claim["claim_id"],
+        "mail_addr": claim["mail_addr"],
         "mile": claim["vehicle_info"]["mile_today"],
         "vehicle_age_years": claim["vehicle_info"]["vehicle_age_years"],
         "warranty_expired": claim["vehicle_info"]["warrenty_expired_this_year"],
@@ -301,7 +298,7 @@ class MailContentAgent:
         )
         self.openai = self.client.get_openai_client()
 
-        system_prompt = "You are a customer promotion email specialist for a 4S dealership under Vehicle Group. Input: customer VIN, churn risk, vehicle info, recommended promotion, and reasoning. Generate a concise, friendly, personalized email based strictly on the recommended promotion within 200 words. Do not change or re-evaluate the recommendation. Tailor the message to the vehicle's age, mileage, warranty status, and churn signal when relevant. Clearly explain the promotion benefit and include a natural call to action. Do not invent prices, discounts, deadlines, or other unsupported details. Format: SUBJECT: <subject> EMAIL: <email body>"
+        system_prompt = "You are a customer promotion email specialist for a 4S dealership under Vehicle Group. Input: customer VIN, mail_addr, churn risk, vehicle info and recommended promotion. Generate a concise, friendly, personalized email based strictly on the recommended promotion within 150 words. Do not change or re-evaluate the recommendation. Tailor the message to the vehicle's age, mileage, warranty status, and churn signal when relevant. Clearly explain the promotion benefit and include a natural call to action. Do not invent prices, discounts, deadlines, or other unsupported details. Format: CLAIM_ID: <claim_id> MAIL_ADDR: <mail_addr> SUBJECT: <subject> EMAIL_BODY: <email body>"
         self.agent = self.client.agents.create_version(
             agent_name="email-content-agent",
             definition=PromptAgentDefinition(
@@ -352,11 +349,18 @@ class AutoSendAgent:
         self.openai = self.client.get_openai_client()
 
         mcp_tool = MCPTool(
-        server_label="api-specs",
-        server_url="https://gitmcp.io/Azure/azure-rest-api-specs",
-        require_approval="always",)
-
-        system_prompt = "You are a helpful agent that can use MCP tools to assist users. Use the available MCP tools to answer questions and perform tasks."
+        server_label="resend",
+        server_url="https://resend-mcp.jollymoss-b73b2a14.swedencentral.azurecontainerapps.io/mcp",
+        require_approval="never",)
+        
+        system_prompt = (
+        "You are a helpful agent that sends email via the resend tool. "
+        "The sender is ALWAYS onboarding@resend.dev, fixed by the system. "
+        "Never ask the user for the sender, reply-to, CC, or BCC. "
+        "When the user asks to send an email, call the send_email tool immediately "
+        "with only mail_addr, subject, and body."
+        )
+        
         self.agent = self.client.agents.create_version(
             agent_name="auto-send-agent",
             definition=PromptAgentDefinition(
@@ -365,6 +369,10 @@ class AutoSendAgent:
                 tools=[mcp_tool]
             ),
         )
+        print('='*20)
+        print(self.agent)
+        import json
+        print(json.dumps(self.agent.as_dict(), indent=2, default=str))
 
         return self.agent
 
@@ -379,24 +387,8 @@ class AutoSendAgent:
                 "name": self.agent.name, "type": "agent_reference"}},
         )
 
-        # Process any MCP approval requests that were generated
-        input_list: ResponseInputParam = []
-        for item in response.output:
-            if item.type == "mcp_approval_request":
-                if item.server_label == "api-specs" and item.id:
-                    input_list.append(
-                        McpApprovalResponse(
-                            type="mcp_approval_response",
-                            approve=True,
-                            approval_request_id=item.id,
-                        )
-                    )
-
-        print("Final input:")
-        print(input_list)
-
         self.openai.conversations.delete(conversation_id=conversation.id)
-        return input_list
+        return response.output_text
 
     def cleanup(self):
         """Delete the agent version and close connections."""
@@ -471,6 +463,7 @@ def main():
 
     print(content_result)
 
+
     print("\n=== Auto Send Agent ===")
     print("Creating agent...")
     send_agent = AutoSendAgent()
@@ -478,7 +471,14 @@ def main():
     print(f"✅ Created: {send_agent.agent.name} (version {send_agent.agent.version})")
 
     send_result = send_agent.run(
-    "Please summarize the Azure REST API specifications Readme")
+    "For each email in EMAILS_TO_SEND, call the send_email tool exactly "
+    "once using the provided mail_addr, subject, and body. "
+    "Do not modify, rewrite, shorten, or regenerate the subject or body. "
+    "Do not skip any email and do not send any email more than once. "
+    "After processing the entire batch, summarize the number of successful "
+    "and failed sends. For failures, include the claim_id and error message.\n"
+    f"EMAILS_TO_SEND: {content_result}"
+    )
 
     print(send_result)
 
