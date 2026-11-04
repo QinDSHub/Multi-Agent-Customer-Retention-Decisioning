@@ -1,10 +1,12 @@
 <img width="990" height="150" alt="Microsoft Agent-a-thon_banner_WEB_990x150" src="https://github.com/user-attachments/assets/5f550061-077d-421c-bba2-4a5820e72fad" />
 
 
-## Multi-Agent Customer Retention Platform
-This project is developed based on Microsoft Agent-a-thon and as The Level 3 Architect
+## Multi-Agent Customer Retention Decisioning
+*Documentation in progress — stay tuned!*
 
+A multi-agent AI solution developed for the Microsoft Agent-a-thon, where I served as the Level 3 Architect, driving the overall solution architecture and multi-agent orchestration design.
 
+---
 
 # Build and Scale AI Agents with Microsoft Foundry
 ## The Level 3: Architect learning path 
